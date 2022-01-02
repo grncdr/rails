@@ -106,6 +106,8 @@ module ActiveRecord
       autoload :FinderMethods
       autoload :Calculations
       autoload :PredicateBuilder
+      autoload :VirtualRow
+      autoload :VirtualFunctions
       autoload :SpawnMethods
       autoload :Batches
       autoload :Delegation

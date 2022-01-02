@@ -409,6 +409,10 @@ module ActiveRecord
         @predicate_builder ||= PredicateBuilder.new(table_metadata)
       end
 
+      def virtual_row # :nodoc:
+        @virtual_row ||= VirtualRow.new(table_metadata)
+      end
+
       def type_caster # :nodoc:
         TypeCaster::Map.new(self)
       end
