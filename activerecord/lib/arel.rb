@@ -16,6 +16,7 @@ require "arel/table"
 require "arel/attributes/attribute"
 
 require "arel/visitors"
+require "arel/visitors/table_references"
 require "arel/collectors/sql_string"
 
 require "arel/tree_manager"
