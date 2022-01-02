@@ -91,7 +91,7 @@ module ActiveRecord
 
     def test_select_without_any_arguments
       error = assert_raises(ArgumentError) { Post.select }
-      assert_equal "Call `select' with at least one field.", error.message
+      assert_equal "The method .select() must contain arguments.", error.message
     end
 
     def test_select_with_block_and_argument

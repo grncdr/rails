@@ -299,7 +299,7 @@ module ActiveRecord
         return super()
       end
 
-      check_if_method_has_arguments!(__callee__, fields, "Call `select' with at least one field.")
+      check_if_method_has_arguments!(__callee__, fields)
       spawn._select!(*fields)
     end
 
@@ -1673,9 +1673,9 @@ module ActiveRecord
       #   check_if_method_has_arguments!(__callee__, args)
       #   ...
       # end
-      def check_if_method_has_arguments!(method_name, args, message = nil)
+      def check_if_method_has_arguments!(method_name, args)
         if args.blank?
-          raise ArgumentError, message || "The method .#{method_name}() must contain arguments."
+          raise ArgumentError, "The method .#{method_name}() must contain arguments."
         else
           yield args if block_given?
 
