@@ -94,7 +94,7 @@ module ActiveRecord
       assert_equal "Call `select' with at least one field.", error.message
     end
 
-    def test_select_with_block_without_any_arguments
+    def test_select_with_block_and_argument
       error = assert_raises(ArgumentError) do
         Post.select("invalid_argument") { }
       end
