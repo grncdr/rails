@@ -101,5 +101,10 @@ module ActiveRecord
 
       assert_equal "`select' with block doesn't take arguments.", error.message
     end
+
+    def test_select_with_block_and_no_arguments
+      posts = Post.select { |post| post.id.odd? }
+      assert_instance_of Array, posts
+    end
   end
 end
