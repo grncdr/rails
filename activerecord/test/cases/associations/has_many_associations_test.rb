@@ -1005,9 +1005,9 @@ class HasManyAssociationsTest < ActiveRecord::TestCase
   end
 
   def test_select_with_block_and_dirty_target
-    assert_equal 2, posts(:welcome).comments.select { true }.size
+    assert_equal 2, posts(:welcome).comments.select { |_post| true }.size
     posts(:welcome).comments.build
-    assert_equal 3, posts(:welcome).comments.select { true }.size
+    assert_equal 3, posts(:welcome).comments.select { |_post| true }.size
   end
 
   def test_select_without_foreign_key

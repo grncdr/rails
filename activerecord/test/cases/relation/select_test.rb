@@ -99,7 +99,7 @@ module ActiveRecord
         Post.select("invalid_argument") { }
       end
 
-      assert_equal "`select' with block doesn't take arguments.", error.message
+      assert_equal "The method .select should be called with arguments or a block, but not both.", error.message
     end
 
     def test_select_with_block_and_no_arguments

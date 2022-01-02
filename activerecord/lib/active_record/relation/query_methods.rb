@@ -250,9 +250,9 @@ module ActiveRecord
       self
     end
 
-    # Works in two unique ways.
+    # Works in three unique ways.
     #
-    # First: takes a block so it can be used just like <tt>Array#select</tt>.
+    # First: takes a single-argument block so it can be used just like <tt>Array#select</tt>.
     #
     #   Model.all.select { |m| m.field == value }
     #
@@ -290,20 +290,36 @@ module ActiveRecord
     #
     #   Model.select(:field).first.other_field
     #   # => ActiveModel::MissingAttributeError: missing attribute: other_field
-    def select(*fields)
-      if block_given?
-        if fields.any?
-          raise ArgumentError, "`select' with block doesn't take arguments."
-        end
-
+    #
+    # Third: takes a zero-argument block that will be evaluated with +self+ set to an
+    # <tt>ActiveRecord::VirtualRow</tt> instance. The return value will then be treated
+    # as arguments to #select the same as above.
+    #
+    #   Model.select { field }.to_sql
+    #   # => [#<Model id: nil, field: "value">]
+    #
+    #   Model.select { [field, other_field] }.to_sql
+    #   # => [#<Model id: nil, field: "value", other_field: "value">]
+    #
+    #   Model.select { [field.as("field_one"), other_field] }.to_sql
+    #   # => [#<Model id: nil, field_one: "value", other_field: "value">]
+    #
+    # This can be especially useful when combined with VirtualRow support for SQL functions:
+    #
+    #   Model.select { [field, upper(field).eq(field).as("all_caps")] }
+    #   # => [#<Model id: nil, field: "value", all_caps: false>]
+    #
+    def select(*fields, &block)
+      check_if_method_has_arguments!(__callee__, fields, block)
+      if block_given? && block.arity == 1
         return super()
       end
 
-      check_if_method_has_arguments!(__callee__, fields)
-      spawn._select!(*fields)
+      spawn._select!(*fields, &block)
     end
 
-    def _select!(*fields) # :nodoc:
+    def _select!(*fields, &block) # :nodoc:
+      fields = with_virtual_row(&block) if block_given?
       self.select_values |= fields
       self
     end
@@ -318,13 +334,14 @@ module ActiveRecord
     #
     # This is short-hand for <tt>unscope(:select).select(fields)</tt>.
     # Note that we're unscoping the entire select statement.
-    def reselect(*args)
-      check_if_method_has_arguments!(__callee__, args)
-      spawn.reselect!(*args)
+    def reselect(*args, &block)
+      check_if_method_has_arguments!(__callee__, args, block)
+      spawn.reselect!(*args, &block)
     end
 
     # Same as #reselect but operates on relation in-place instead of copying.
-    def reselect!(*args) # :nodoc:
+    def reselect!(*args, &block) # :nodoc:
+      args = with_virtual_row(&block) if block
       self.select_values = args
       self
     end
@@ -349,13 +366,21 @@ module ActiveRecord
     #
     #   User.select([:id, :first_name]).group(:id, :first_name).first(3)
     #   # => [#<User id: 1, first_name: "Bill">, #<User id: 2, first_name: "Earl">, #<User id: 3, first_name: "Beto">]
-    def group(*args)
-      check_if_method_has_arguments!(__callee__, args)
-      spawn.group!(*args)
+    #
+    # Pass a block argument to create grouping expressions with an <tt>ActiveRecord::VirtualRow</tt>:
+    #
+    #   User.group { (age - (age % 10)).as('age_bracket') }
+    def group(*args, &block)
+      check_if_method_has_arguments!(__callee__, args, block)
+      spawn.group!(*args, &block)
     end
 
-    def group!(*args) # :nodoc:
-      self.group_values += args
+    def group!(*args, &block) # :nodoc:
+      if block_given?
+        self.group_values += with_virtual_row(&block)
+      else
+        self.group_values += args
+      end
       self
     end
 
@@ -399,10 +424,18 @@ module ActiveRecord
     #   User.order('name DESC, email')
     #   # SELECT "users".* FROM "users" ORDER BY name DESC, email
     #
-    # === Arel
+    # === Block arguments
+    #
+    # Passing a block argument allows construction of more complicated expressions
+    # using an an <tt>ActiveRecord::VirtualRow</tt>.
+    #
+    #    User.order { (end_date - start_date).desc.nulls_first }
+    #    # SELECT "users".* FROM "users" ORDER BY end_date - start_date DESC NULLS FIRST
+    #
+    # === Arel.sql
     #
     # If you need to pass in complicated expressions that you have verified
-    # are safe for the database, you can use Arel.
+    # are safe for the database, you can use also use +Arel.sql+.
     #
     #   User.order(Arel.sql('end_date - start_date'))
     #   # SELECT "users".* FROM "users" ORDER BY end_date - start_date
@@ -411,15 +444,17 @@ module ActiveRecord
     #
     #   User.order(Arel.sql("payload->>'kind'"))
     #   # SELECT "users".* FROM "users" ORDER BY payload->>'kind'
-    def order(*args)
-      check_if_method_has_arguments!(__callee__, args) do
+    #
+    def order(*args, &block)
+      check_if_method_has_arguments!(__callee__, args, block) do
         sanitize_order_arguments(args)
       end
-      spawn.order!(*args)
+      spawn.order!(*args, &block)
     end
 
     # Same as #order but operates on relation in-place instead of copying.
-    def order!(*args) # :nodoc:
+    def order!(*args, &block) # :nodoc:
+      args = with_virtual_row(&block) if block
       preprocess_order_args(args) unless args.empty?
       self.order_values |= args
       self
@@ -456,15 +491,16 @@ module ActiveRecord
     #   User.order('email DESC').reorder('id ASC').order('name ASC')
     #
     # generates a query with 'ORDER BY id ASC, name ASC'.
-    def reorder(*args)
-      check_if_method_has_arguments!(__callee__, args) do
+    def reorder(*args, &block)
+      check_if_method_has_arguments!(__callee__, args, block) do
         sanitize_order_arguments(args)
       end
-      spawn.reorder!(*args)
+      spawn.reorder!(*args, &block)
     end
 
     # Same as #reorder but operates on relation in-place instead of copying.
-    def reorder!(*args) # :nodoc:
+    def reorder!(*args, &block) # :nodoc:
+      args = with_virtual_row(&block) if block_given?
       preprocess_order_args(args)
       args.uniq!
       self.reordering_value = true
@@ -702,6 +738,23 @@ module ActiveRecord
     #    User.joins(:posts).where("posts.published" => true)
     #    User.joins(:posts).where(posts: { published: true })
     #
+    # === block argument
+    #
+    # You may pass a block argument to use an <tt>ActiveRecord::VirtualRow</tt> for constructing
+    # more complex expressions.
+    #
+    #    Post.joins(:user).where { |post| (post.views > 100).and(post.user.created_at > 2.days.ago) } 
+    #
+    # This also enables comparisons between columns:
+    #
+    #    Post.joins(:user).where { |post| post.created_at < (user.created_at + 1.week) }
+    #
+    # If the block does not use methods or instance variables of the caller, you can omit
+    # the argument and the block will be evaluated with +self+ set the the VirtualRow instance.
+    # This allows for an even more concise version of the above:
+    #
+    #    Post.joins(:user).where { (views > 100).and(user.created_at > 2.days.ago) }
+    #
     # === no argument
     #
     # If no argument is passed, #where returns a new instance of WhereChain, that
@@ -716,8 +769,11 @@ module ActiveRecord
     #
     # If the condition is any blank-ish object, then #where is a no-op and returns
     # the current relation.
-    def where(*args)
-      if args.empty?
+    def where(*args, &block)
+      if block_given?
+        check_if_method_has_arguments!(__callee__, args, block)
+        spawn.where!(*args, &block)
+      elsif args.empty?
         WhereChain.new(spawn)
       elsif args.length == 1 && args.first.blank?
         self
@@ -726,8 +782,15 @@ module ActiveRecord
       end
     end
 
-    def where!(opts, *rest) # :nodoc:
-      self.where_clause += build_where_clause(opts, rest)
+    def where!(*args, &block) # :nodoc:
+      if block_given?
+        with_virtual_row(&block).each do |opts|
+          self.where_clause += build_where_clause(opts)
+        end
+      else
+        opts, *rest = args
+        self.where_clause += build_where_clause(opts, rest)
+      end
       self
     end
 
@@ -873,13 +936,25 @@ module ActiveRecord
     # Allows to specify a HAVING clause. Note that you can't use HAVING
     # without also specifying a GROUP clause.
     #
-    #   Order.having('SUM(price) > 30').group('user_id')
-    def having(opts, *rest)
-      opts.blank? ? self : spawn.having!(opts, *rest)
+    #   Order.group('user_id').having('SUM(price) > 30')
+    #   Order.group(:user_id).having { price.sum.gt(30) }
+    def having(*args, &block)
+      if block_given?
+        check_if_method_has_arguments!(__callee__, args, block)
+      end
+      !args.blank? && args.first.blank? ? self : spawn.having!(*args, &block)
     end
 
-    def having!(opts, *rest) # :nodoc:
-      self.having_clause += build_having_clause(opts, rest)
+    def having!(*args, &block) # :nodoc:
+      if block_given?
+        with_virtual_row(&block).each do |opts|
+          self.having_clause += build_having_clause(opts)
+        end
+      else
+        opts, *rest = args
+        self.having_clause += build_having_clause(opts, rest)
+      end
+
       self
     end
 
@@ -1297,6 +1372,18 @@ module ActiveRecord
       end
       alias :build_having_clause :build_where_clause
 
+      def with_virtual_row(&block)
+        result = block.arity == 0 ? virtual_row.instance_eval(&block) : block.call(virtual_row)
+        nodes = Array.wrap(result)
+        references = []
+        visitor = Arel::Visitors::TableReferences.new
+        nodes.each do |node|
+          visitor.accept(node, references)
+        end
+        self.references_values |= references unless references.empty?
+        nodes
+      end
+
     private
       def lookup_table_klass_from_join_dependencies(table_name)
         each_join_dependencies do |join|
@@ -1657,25 +1744,32 @@ module ActiveRecord
         end
       end
 
-      # Checks to make sure that the arguments are not blank. Note that if some
-      # blank-like object were initially passed into the query method, then this
-      # method will not raise an error.
+      # Checks to make sure that the arguments are not blank. For methods that
+      # support a VirtualRow block, checks that either arguments or a block were
+      # passed into the query method, but not both. Note that if some blank-like
+      # object were initially passed into the query method, then this method will
+      # not raise an error.
       #
       # Example:
       #
-      #    Post.references()   # raises an error
-      #    Post.references([]) # does not raise an error
+      #    Post.order()       # raises an error
+      #    Post.order([])     # does not raise an error
+      #    Post.order([]) { } # raises an error
+      #    Post.order { }     # does not raise an error
       #
       # This particular method should be called with a method_name (__callee__) and the args
-      # passed into that method as an input. For example:
+      # passed into that method as an input, including the block, if the method accepts a block
+      # argument. For example:
       #
-      # def references(*args)
-      #   check_if_method_has_arguments!(__callee__, args)
+      # def order(*args, &block)
+      #   check_if_method_has_arguments!(__callee__, args, block)
       #   ...
       # end
-      def check_if_method_has_arguments!(method_name, args)
+      def check_if_method_has_arguments!(method_name, args, block_arg = nil)
         if args.blank?
-          raise ArgumentError, "The method .#{method_name}() must contain arguments."
+          raise ArgumentError, "The method .#{method_name}() must contain arguments." unless block_arg
+        elsif block_arg
+          raise ArgumentError, "The method .#{method_name} should be called with arguments or a block, but not both."
         else
           yield args if block_given?
 
